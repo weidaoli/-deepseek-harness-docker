@@ -1,17 +1,17 @@
 # DeepSeek Harness (dsh) — Docker 容器
 
-把 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 构建成 Docker 容器，
+把 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 以 **npm 分发版**（`@deepseek-ai/dsh`）打包成 Docker 容器，
 运行其 Web UI（`dsh web`），并通过挂载卷与宿主机**共享一个工作目录**。
 
-构建流程已在仓库源码上实际验证：`pnpm install --frozen-lockfile` → `pnpm run build` → `dsh web` 监听 `127.0.0.1:3080` 返回 HTTP 200。
+镜像直接在官方 npm 包上构建（无需 clone 源码 / pnpm / 全量编译），已实测：`dsh web` 监听 `127.0.0.1:3080` 返回 HTTP 200，终端（node-pty）等原生模块正常。
 
 ## 文件说明
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | 两阶段构建：builder 编译 monorepo，runtime 只跑编译产物 |
+| `Dockerfile` | 单阶段：`npm install -g @deepseek-ai/dsh`，秒级构建 |
 | `entrypoint.sh` | 容器入口：从共享工作目录启动 `dsh`，参数直通 CLI |
-| `docker-compose.yml` | 一键编排（host 网络 + 双卷挂载） |
+| `docker-compose.yml` | 一键编排（端口发布 + 双卷挂载） |
 | `workspace/` | 与容器共享的工作目录（宿主侧） |
 
 ## 快速开始
@@ -19,7 +19,7 @@
 ```bash
 cd deepseek-harness-docker
 
-# 构建（首次约 5–10 分钟，取决于网络）
+# 构建（npm 包方式，约 1 分钟）
 docker build -t dsh .
 
 # 运行：Web UI 在 http://127.0.0.1:3080
@@ -132,10 +132,9 @@ docker run -e DEEPSEEK_API_KEY=sk-xxx ...
 
 ## 构建细节 / 排错
 
-- **Node 24 是硬性要求**：引擎要求 `^22.19.0 || >=24.0.0`，但 `tsdown` 在 Node 22 上会 fallback 到未安装的 `unrun` loader（原生 TS 支持是 Node 24+ 的特性），构建会失败。基础镜像固定为 `node:24-bookworm-slim`。
-- pnpm 固定为仓库声明的 `11.7.0`（用 `npm i -g pnpm` 安装，避免依赖基础镜像 corepack 版本）。
-- postinstall 会安装 lefthook git hooks，需要 `git >= 2.26`，镜像已包含。
-- 原生模块（lightningcss / landlock-run 等）均有 linux-x64/arm64 预编译产物，无需本地工具链；`python3/make/g++` 只是兜底。
-- 换仓库源/分支：`docker build --build-arg REPO_URL=... --build-arg BRANCH=... -t dsh .`
+- **npm 包方式**：`npm install -g @deepseek-ai/dsh`（默认 `latest`，RC 阶段迭代很快）。想固定版本：`docker build --build-arg DSH_VERSION=0.1.0-rc.6 -t dsh .`
+- 包自带完整 Web UI 资源与全部依赖（61 个），**无需 clone 源码、无需 pnpm/tsc/tsdown 构建**，构建时间约 1 分钟。
+- npm 11 会对 node-pty 等原生依赖的构建脚本给出 allow-scripts 提示，但脚本仍会执行（拉取/编译匹配当前 Node 的预编译二进制）；镜像内置 `make/g++/python3` 兜底 node-gyp 编译。已实测容器内 node-pty 正常工作。
+- 首次启动 `dsh web` 时会在 `$DSH_HOME/profiles/` 自动准备 web profile（需要访问 npm registry 网络）。
 - `HEALTHCHECK` 只对 `web` 模式有意义；headless 等模式显示 unhealthy 属正常现象。
-- 镜像体积偏大（node_modules + 构建产物约 1–2 GB）：dsh 运行时仍需源码树与 tsx 等依赖，未做 `pnpm prune`，保证功能完整。
+- 镜像约 1.6 GB（node:24-bookworm-slim 基础镜像 + 工具链 + 61 依赖）；嫌大可去掉 `make g++` 构建工具（仅 node-pty 无预编译时兜底用）。

@@ -1,82 +1,41 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================================
-# DeepSeek Harness (dsh) — https://github.com/deepseek-ai/deepseek-harness
+# DeepSeek Harness (dsh) — npm 分发版
 #
-# Two-stage build:
-#   builder — clones the repo, installs deps, compiles the monorepo
-#   runtime — minimal image that runs the Web UI (or any dsh profile)
+# 直接安装 npm 上的 @deepseek-ai/dsh（含完整 Web UI 资源），无需 clone 源码、
+# 无需 pnpm/tsc/tsdown 全量构建。镜像大幅缩小、构建秒级完成。
 #
-# The Web UI listens on 127.0.0.1:3080 *by design*: the project deliberately
-# rejects `--host 0.0.0.0` because it would expose remote code execution to
-# the network. To reach the UI from the host, use `--network host` (Linux),
-# see README.md for details and alternatives.
+# 注意：dsh 的 Web UI 故意只绑定 127.0.0.1（拒绝 --host 0.0.0.0，避免暴露
+# 远程代码执行）。通过可选的 socat 回环转发（DSH_RELAY_PORT）配合 -p 发布，
+# 或纯 Linux 下用 --network host，详见 README.md。
 # ============================================================================
 
 ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE}
 
-# --------------------------------------------------------------------------
-# Stage 1: builder
-# --------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS builder
+# dsh 版本：默认 latest（RC 阶段迭代很快），可用 --build-arg 固定，
+# 例如 --build-arg DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=latest
 
-# git >= 2.26 is required by the repo's postinstall (lefthook) hook.
-# python3/make/g++ are insurance for native modules without prebuilt binaries.
+# 系统依赖：git/python3/curl/procps 供 agent 任务与健康检查；socat 回环转发；
+# make/g++/python3 兜底原生模块（node-pty 等）的 node-gyp 构建。
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates git python3 make g++ \
- && rm -rf /var/lib/apt/lists/*
-
-# Pin pnpm to the version the repo declares (`packageManager: pnpm@11.7.0`).
-# Installing via npm is deterministic and independent of the corepack version
-# bundled with the base image.
-RUN npm install -g pnpm@11.7.0
-
-ARG REPO_URL=https://github.com/deepseek-ai/deepseek-harness.git
-ARG BRANCH=master
-
-RUN git clone --depth 1 --branch "$BRANCH" "$REPO_URL" /src
-
-WORKDIR /src
-
-# CI sets this so builds never report to the production telemetry endpoint.
-ENV DSH_TELEMETRY_DISABLED=1
-
-# Node >= 24 is required at build time: tsdown falls back to an uninstalled
-# `unrun` loader on Node 22 (native TypeScript support is Node 24+).
-RUN pnpm install --frozen-lockfile
-RUN pnpm run build
-
-# Quick sanity check that the compiled launcher works.
-RUN node apps/cli/lib/bin.js --version
-
-# --------------------------------------------------------------------------
-# Stage 2: runtime
-# --------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS runtime
-
-# curl: healthcheck + convenience; git/python3/procps: handy for agent tasks.
-# socat: optional loopback relay so `-p` port publishing works with the
-# loopback-bound server on Docker Desktop/WSL2 (see README).
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl git python3 procps socat \
+      ca-certificates curl git python3 procps socat make g++ \
  && rm -rf /var/lib/apt/lists/* \
- # UID 1000 is taken by the base image's `node` user, so dsh gets 1001.
+ # UID 1000 被基础镜像的 `node` 用户占用，dsh 用 1001。
  && useradd --create-home --uid 1001 dsh
 
-# The fully built checkout (source + node_modules + build artifacts).
-# `apps/cli/lib/bin.js` is the compiled launcher and needs no tsx/pnpm.
-COPY --from=builder /src /opt/deepseek-harness
+# 全局安装 dsh CLI。npm 11 会对依赖的原生构建脚本给出 allow-scripts 提示，
+# 但脚本仍会执行（node-pty 的 prebuild 会拉取/编译匹配当前 Node 的二进制）。
+RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} \
+ && dsh --version
 
-# Shared working directory. Mount a host directory here, e.g.
-#   -v "$PWD:/workspace"
-# dsh uses its invoking directory as the default filesystem location, and the
-# entrypoint starts from $DSH_WORKSPACE so the mounted volume is the default.
+# 共享工作目录（宿主 bind mount 到 /workspace）
 RUN mkdir -p /workspace && chown dsh:dsh /workspace \
- # Pre-create the dsh home so a fresh volume mounted over it inherits dsh
- # ownership via Docker's copy-up (otherwise the volume root is root-owned
- # and the dsh user cannot create profiles/node_modules inside it).
+ # 预建 dsh home，让全新卷挂载后（copy-up）保留 dsh 属主，否则 dsh 用户
+ # 无法在 ~/.dsh 下创建 profiles/。
  && mkdir -p /home/dsh/.dsh && chown -R dsh:dsh /home/dsh
 
 USER dsh
@@ -88,12 +47,10 @@ ENV DSH_TELEMETRY_DISABLED=1 \
 COPY --chown=dsh:dsh entrypoint.sh /usr/local/bin/dsh-entrypoint
 RUN chmod +x /usr/local/bin/dsh-entrypoint
 
-# Informational only — the server binds 127.0.0.1:3080 inside the container.
-# Use `docker run --network host` (or a loopback relay, see README) to access it.
+# 仅作说明——服务器绑定容器内 127.0.0.1:3080。
 EXPOSE 3080
 
-# Meaningful for `web` mode (the default CMD); other profiles will report
-# unhealthy, which is expected.
+# 仅对 web 模式有意义；其他 profile 显示 unhealthy 属正常。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:3080/ >/dev/null || exit 1
 

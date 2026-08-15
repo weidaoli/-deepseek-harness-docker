@@ -45,4 +45,4 @@ if [[ -n "${DSH_RELAY_PORT:-}" && "${DSH_RELAY_PORT}" != "0" ]]; then
   fi
 fi
 
-exec node /opt/deepseek-harness/apps/cli/lib/bin.js "$@"
+exec dsh "$@"
