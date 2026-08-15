@@ -178,6 +178,31 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
 
 > 若只想部分放行（普通方法可用、settings/credentials 仍锁 loopback），保留浏览器 Host 并配 `DSH_TRUSTED_HOST` 即可（见下文），但 `settings.describe` 等特权方法仍会 403。
 
+## 插件管理
+
+dsh 的插件分两层：**内置插件**（npm 包 `@deepseek-ai/dsh-*`，195 个，只读）和 **profile 插件**（用户装到某个 profile 的）。目录：
+
+| 内容 | 容器内路径 | 宿主侧（bind mount） |
+|---|---|---|
+| 内置插件（bundle） | `/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/` | 无（镜像内） |
+| profile 清单（依赖声明） | `~/.dsh/profiles/web/package.json` | `dsh-home/profiles/web/package.json` |
+| profile 插件依赖（pnpm 安装） | `~/.dsh/profiles/node_modules/` | `dsh-home/profiles/node_modules/` |
+| 用户自定义 Agent 预设 | `~/.dsh/.agent-presets/` | `dsh-home/.agent-presets/` |
+
+安装插件（镜像已内置 pnpm 11.7，`dsh plugin` 命令可用）：
+
+```bash
+# 容器内执行：往 web profile 装一个插件
+docker compose exec dsh dsh plugin --profile web add <你的插件包名>
+
+# 等价于在 profile 目录里跑 pnpm（也可直接操作宿主侧的 dsh-home）
+docker compose exec dsh sh -c 'cd /home/dsh/.dsh/profiles/web && pnpm add <插件包名>'
+```
+
+卸载/重装：`dsh plugin --profile web remove <包名>` / `dsh plugin --profile web install`。
+
+插件配置写在 `~/.dsh/profiles/web/cordis.patch.yml`（宿主侧 `dsh-home/profiles/web/cordis.patch.yml` 可直接编辑）。
+
 ## 模型凭据
 
 dsh 是 agent harness，需要 LLM 凭据才能干活。Web UI 里的 **Models 页面**可配置 provider/API key（会写入 `~/.dsh` 持久卷）；命令行/headless 方式可导出环境变量，例如默认 deepseek provider：

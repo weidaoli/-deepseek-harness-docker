@@ -33,6 +33,11 @@ RUN apt-get update \
 RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} \
  && dsh --version
 
+# pnpm：`dsh plugin --profile <name> add <pkg>` 在 profile 目录里转发 pnpm
+# 安装插件，没有 pnpm 会直接报错（dsh: pnpm not found on PATH）。
+RUN npm install -g pnpm@11.7.0 \
+ && pnpm --version
+
 # 共享工作目录（宿主 bind mount 到 /workspace）
 RUN mkdir -p /workspace && chown dsh:dsh /workspace \
  # 预建 dsh home，让全新卷挂载后（copy-up）保留 dsh 属主，否则 dsh 用户
