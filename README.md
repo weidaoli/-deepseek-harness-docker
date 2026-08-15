@@ -138,27 +138,45 @@ ssh -L 3080:127.0.0.1:3080 root@<服务器IP>
 # apt install caddy && caddy reverse-proxy --from https://dsh.你的域名 --to 127.0.0.1:3080
 ```
 
-### HTTPS 反代/Caddy 场景还要配 `DSH_TRUSTED_HOST`（否则 /api 全部 403）
+### HTTPS 反代/Caddy 场景：请改 Host/Origin 为回环（推荐），而非只配 `DSH_TRUSTED_HOST`
 
-dsh 的 `/api` 有 **browser-trust 栅栏**（防 DNS rebinding）：只接受 Host 为回环地址或**显式声明**的 authority。Caddy 默认保留浏览器的 Host 头（域名/IP）转发给 dsh，dsh 不认识就会拒绝：
+dsh 的 `/api` 有 **browser-trust 栅栏**（防 DNS rebinding）：
+
+1. 所有请求：Host 必须为回环地址或**显式声明**的 authority（`--trusted-host`）
+2. **特权方法**（`settings.*`、`credentials.*`、`agentPreset.read` 等敏感操作）：**只接受回环 Host**，`--trusted-host` 也救不了——这正是 `settings.describe` 报 403 的原因
+3. Origin 与 Host 必须一致
+
+**因此正确配置是 Caddy 把 Host/Origin 统一改写成回环**（dsh 会认为浏览器就在本机，所有方法放行）：
 
 ```
-transport failure for /api/agentPreset.list: HTTP 403
-加载提供方目录失败: transport failure for /api/llm.providers: HTTP 403
+# /etc/caddy/Caddyfile
+https://192.168.14.1 {
+    reverse_proxy 127.0.0.1:3080 {
+        # dsh 的 browser-trust 栅栏要求 Host 为回环且与 Origin 一致；
+        # 特权方法（settings/credentials 等）更是只认 loopback Host。
+        header_up Host 127.0.0.1:3080
+        header_up Origin http://127.0.0.1:3080
+    }
+}
 ```
 
-在 compose 里声明即可（entrypoint 自动转成 `dsh web --trusted-host ...`）：
-
-```yaml
-environment:
-  - DSH_TRUSTED_HOST=192.168.14.1   # 你的域名或 IP，多个用逗号分隔
-```
-
-改完重启：`docker compose up -d --build`。验证（200 = 信任生效；Host 不在列表时仍会 403，栅栏不会放松）：
+或命令行（Caddy ≥ 2.7）：
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Host: 192.168.14.1" -H "Content-Type: application/json" -d '{}' http://127.0.0.1:3080/api/agentPreset.list
+caddy reverse-proxy --from https://192.168.14.1 --to 127.0.0.1:3080 \
+  --header-up "Host 127.0.0.1:3080" --header-up "Origin http://127.0.0.1:3080"
 ```
+
+改完后 compose 里的 `DSH_TRUSTED_HOST` 可留可不留（无害双保险）；验证（200 = 放行）：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  -H "Host: 127.0.0.1:3080" -H "Origin: http://127.0.0.1:3080" \
+  -H "Content-Type: application/json" -d '{}' \
+  http://127.0.0.1:3080/api/settings.describe
+```
+
+> 若只想部分放行（普通方法可用、settings/credentials 仍锁 loopback），保留浏览器 Host 并配 `DSH_TRUSTED_HOST` 即可（见下文），但 `settings.describe` 等特权方法仍会 403。
 
 ## 模型凭据
 
