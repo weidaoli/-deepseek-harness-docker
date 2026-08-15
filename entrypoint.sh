@@ -43,11 +43,29 @@ fi
 # dsh 实际监听端口：`--port N` 优先，否则 $DSH_PORT，默认 3080
 DSH_PORT="${DSH_PORT:-3080}"
 args=("$@")
+IS_WEB=0
 for ((i = 0; i < ${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "--port" && $((i + 1)) -lt ${#args[@]} ]]; then
     DSH_PORT="${args[$((i + 1))]}"
   fi
+  if [[ "${args[$i]}" == "web" || ( "${args[$i]}" == "--profile" && $((i + 1)) -lt ${#args[@]} && "${args[$((i + 1))]}" == "web" ) ]]; then
+    IS_WEB=1
+  fi
+  # 用户已显式传 --trusted-host 时不再追加
+  if [[ "${args[$i]}" == "--trusted-host" ]]; then
+    TRUSTED_HOST_GIVEN=1
+  fi
 done
+
+# HTTPS 反代（Caddy/nginx）场景：浏览器 Host 是域名/IP，不在 dsh 的
+# browser-trust 信任列表会导致 /api 全部 403。用 DSH_TRUSTED_HOST 声明
+# 该 authority（逗号/空格分隔多个，host 或 host:port）。仅 web 模式生效。
+if [[ "$IS_WEB" == "1" && -n "${DSH_TRUSTED_HOST:-}" && -z "${TRUSTED_HOST_GIVEN:-}" ]]; then
+  IFS=', ' read -r -a extra_hosts <<< "$DSH_TRUSTED_HOST"
+  for h in "${extra_hosts[@]}"; do
+    [[ -n "$h" ]] && args+=("--trusted-host" "$h")
+  done
+fi
 
 # 可选回环转发（--network host 时不要设置 DSH_RELAY_PORT）。
 # 只绑定容器主网卡 IP（-p DNAT 的目标），避免与 dsh 的回环绑定冲突。
@@ -60,4 +78,4 @@ if [[ -n "${DSH_RELAY_PORT:-}" && "${DSH_RELAY_PORT}" != "0" ]]; then
   fi
 fi
 
-exec dsh "$@"
+exec dsh "${args[@]}"

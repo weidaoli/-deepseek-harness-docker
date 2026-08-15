@@ -1,11 +1,14 @@
 services:
   dsh:
+    # 与 `docker build -t dsh .` 共用同一镜像名，避免 compose 用自己的
+    # 镜像名缓存旧版本（记得 compose up --build 或先 docker build -t dsh .）
+    image: dsh:latest
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Which branch/tag/commit of deepseek-ai/deepseek-harness to build.
-        BRANCH: master
+        # dsh npm 包版本；留空则用 latest
+        DSH_VERSION: ""
     # dsh deliberately refuses to bind 0.0.0.0 (it would expose remote code
     # execution to the network), so the server binds 127.0.0.1:3080 *inside*
     # the container. DSH_RELAY_PORT makes the entrypoint start a socat relay
@@ -20,6 +23,9 @@ services:
     environment:
       - DSH_TELEMETRY_DISABLED=1
       - DSH_RELAY_PORT=3080
+      # HTTPS 反代（Caddy/nginx）访问时，把浏览器使用的域名/IP 加入 dsh 的
+      # browser-trust 列表，否则 /api 请求全部 403。host 或 host:port，多个用逗号分隔。
+      - DSH_TRUSTED_HOST=192.168.14.1
     volumes:
       # Shared working directory (host <-> container). dsh starts here and
       # uses it as the default filesystem location.

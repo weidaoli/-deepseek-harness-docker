@@ -32,7 +32,7 @@ docker run --rm -p 3080:3080 \
   dsh
 ```
 
-或直接用 compose（已内置上述配置）：
+或直接用 compose（已内置上述配置；compose 与 `docker build -t dsh .` 共用 `dsh:latest` 镜像名，**改完配置记得 `docker compose up -d --build` 或先 `docker build -t dsh .`**）：
 
 ```bash
 docker compose up -d --build
@@ -62,7 +62,8 @@ docker compose up -d --build
 两种方案：
 
 1. **socat 回环转发（默认，通用）**：entrypoint 在 `DSH_RELAY_PORT` 非空时启动
-   `socat TCP-LISTEN:0.0.0.0:3080 -> TCP:127.0.0.1:3080`，容器内 `-p 3080:3080` 的流量经回环进入 dsh。
+   `socat TCP-LISTEN:容器IP:3080 -> TCP:127.0.0.1:3080`（只绑容器网卡 IP，不与 dsh 的回环绑定冲突），
+   容器内 `-p 3080:3080` 的流量经回环进入 dsh。
    Docker Desktop / WSL2 / Linux 都可用（compose 已内置）。
    ⚠️ 注意：此时容器内 3080 对外网可达，仅在可信网络使用。
 2. **`--network host`（纯 Linux 原生）**：容器回环即宿主回环，无需转发，`http://127.0.0.1:3080` 直达；
@@ -135,6 +136,28 @@ ssh -L 3080:127.0.0.1:3080 root@<服务器IP>
 
 # B. HTTPS 反代（需要域名，Caddy 自动签证书）
 # apt install caddy && caddy reverse-proxy --from https://dsh.你的域名 --to 127.0.0.1:3080
+```
+
+### HTTPS 反代/Caddy 场景还要配 `DSH_TRUSTED_HOST`（否则 /api 全部 403）
+
+dsh 的 `/api` 有 **browser-trust 栅栏**（防 DNS rebinding）：只接受 Host 为回环地址或**显式声明**的 authority。Caddy 默认保留浏览器的 Host 头（域名/IP）转发给 dsh，dsh 不认识就会拒绝：
+
+```
+transport failure for /api/agentPreset.list: HTTP 403
+加载提供方目录失败: transport failure for /api/llm.providers: HTTP 403
+```
+
+在 compose 里声明即可（entrypoint 自动转成 `dsh web --trusted-host ...`）：
+
+```yaml
+environment:
+  - DSH_TRUSTED_HOST=192.168.14.1   # 你的域名或 IP，多个用逗号分隔
+```
+
+改完重启：`docker compose up -d --build`。验证（200 = 信任生效；Host 不在列表时仍会 403，栅栏不会放松）：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Host: 192.168.14.1" -H "Content-Type: application/json" -d '{}' http://127.0.0.1:3080/api/agentPreset.list
 ```
 
 ## 模型凭据
