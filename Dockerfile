@@ -28,7 +28,8 @@ RUN apt-get update \
  && useradd --create-home --uid 1001 dsh
 
 # 全局安装 dsh CLI。npm 11 会对依赖的原生构建脚本给出 allow-scripts 提示，
-# 但脚本仍会执行（node-pty 的 prebuild 会拉取/编译匹配当前 Node 的二进制）。
+# 但脚本仍会执行；其中 node-pty 在 Linux 上无预编译，靠 make/g++/python3
+# 经 node-gyp 本地编译（见 README 排错一节）。
 RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} \
  && dsh --version
 

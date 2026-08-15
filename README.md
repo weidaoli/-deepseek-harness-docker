@@ -134,7 +134,7 @@ docker run -e DEEPSEEK_API_KEY=sk-xxx ...
 
 - **npm 包方式**：`npm install -g @deepseek-ai/dsh`（默认 `latest`，RC 阶段迭代很快）。想固定版本：`docker build --build-arg DSH_VERSION=0.1.0-rc.6 -t dsh .`
 - 包自带完整 Web UI 资源与全部依赖（61 个），**无需 clone 源码、无需 pnpm/tsc/tsdown 构建**，构建时间约 1 分钟。
-- npm 11 会对 node-pty 等原生依赖的构建脚本给出 allow-scripts 提示，但脚本仍会执行（拉取/编译匹配当前 Node 的预编译二进制）；镜像内置 `make/g++/python3` 兜底 node-gyp 编译。已实测容器内 node-pty 正常工作。
+- npm 11 会对 node-pty 等原生依赖的构建脚本给出 allow-scripts 提示，但脚本仍会执行。**`make/g++/python3` 在 Linux 上是必需的**：node-pty（终端功能）的 npm 包只带 darwin/win32 预编译，`prebuilds/linux-x64` 不存在，必然走 `node-gyp rebuild` 本地编译（已实测：去掉编译器后 npm install 直接失败）。不要移除。
 - 首次启动 `dsh web` 时会在 `$DSH_HOME/profiles/` 自动准备 web profile（需要访问 npm registry 网络）。
 - `HEALTHCHECK` 只对 `web` 模式有意义；headless 等模式显示 unhealthy 属正常现象。
 - 镜像约 1.6 GB（node:24-bookworm-slim 基础镜像 + 工具链 + 61 依赖）；嫌大可去掉 `make g++` 构建工具（仅 node-pty 无预编译时兜底用）。
