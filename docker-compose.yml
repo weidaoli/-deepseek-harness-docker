@@ -26,7 +26,7 @@ services:
       - ./workspace:/workspace
       # Shared harness home (host <-> container): settings.yaml,
       # .credentials.yaml, profiles/*, sessions — all dsh config lives here.
-      # First run: mkdir -p dsh-home && sudo chown -R 1001:1001 dsh-home
-      # (optionally: rm -rf dsh-home/profiles/node_modules — dsh rebuilds it)
+      # 权限：entrypoint 以 root 启动，会自动把这两个目录属主修正为 1001
+      # 再降权运行，无需手动 chown。
       - ./dsh-home:/home/dsh/.dsh
     restart: unless-stopped

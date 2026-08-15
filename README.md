@@ -24,8 +24,7 @@ docker build -t dsh .
 
 # 运行：Web UI 在 http://127.0.0.1:3080
 # 默认启用 socat 回环转发，-p 端口发布即可直达（Docker Desktop / WSL2 / Linux 通用）
-mkdir -p workspace dsh-home && sudo chown -R 1001:1001 workspace dsh-home
-
+# 权限已自动化：entrypoint 会以 root 修复挂载目录属主并降权运行，无需手动 chown
 docker run --rm -p 3080:3080 \
   -e DSH_RELAY_PORT=3080 \
   -v "$PWD/workspace:/workspace" \
@@ -47,11 +46,7 @@ docker compose up -d --build
 - dsh 把**启动目录**当作默认文件系统位置，entrypoint 从 `/workspace` 启动，因此共享卷就是默认工作区；agent 对文件的读写都发生在这里，宿主机和容器看到同一份文件。
 - 想换目录：`-v /any/host/path:/workspace` 即可，或容器内用环境变量 `DSH_WORKSPACE` 覆盖。
 
-**权限**：容器以非 root 用户 `dsh`（uid 1001）运行，bind 挂载的宿主目录若属主不是 1001 会写不进去。宿主侧执行一次：
-
-```bash
-sudo chown -R 1001:1001 workspace/   # 或: chmod -R a+rwX workspace/
-```
+**权限（已自动化）**：容器以 root 启动，entrypoint 会自动把 `$DSH_HOME` 与 `$DSH_WORKSPACE` 两个挂载目录的属主修正为 uid 1001，然后通过 `setpriv` 降权到 `dsh` 用户运行。因此**无需手动 chown**，无论目录是 root 还是其他用户创建的都能用。首次启动日志会看到 `fixing ownership of ... -> 1001:1001`，之后重启会跳过（属主已正确）。
 
 ## 状态持久化
 
@@ -100,10 +95,9 @@ volumes:
   - ./dsh-home:/home/dsh/.dsh    # 配置目录（settings.yaml / .credentials.yaml / profiles/ 等）
 ```
 
-首次使用：
+首次使用（无需手动 chown，entrypoint 自动修复）：
 
 ```bash
-mkdir -p dsh-home && sudo chown -R 1001:1001 dsh-home
 # 可选：先删掉插件依赖目录（几百 MB，容器启动时 dsh 会自动重建）
 # rm -rf dsh-home/profiles/node_modules
 ```
@@ -121,6 +115,27 @@ mkdir -p dsh-home && sudo chown -R 1001:1001 dsh-home
 | `sessions/` | 会话数据 | |
 
 另外：dsh 会从**启动目录（即 `/workspace`）加载 `.env`**——把 `DEEPSEEK_API_KEY` 等写进共享工作目录的 `.env` 就能直接生效，比改 `.credentials.yaml` 更简单。
+
+## 远程访问 Web UI（重要：不要用 `http://公网IP:3080` 直连）
+
+dsh 前端 bundle 使用了 `crypto.randomUUID()`（浏览器 **Secure Context 专属** API）：只有 `https://` 或 `http://localhost` 下存在，用 `http://<IP>` 访问时它是 `undefined`，Models 页等打开时报错：
+
+```
+加载提供方目录失败: crypto.randomUUID is not a function
+```
+
+（服务端 Node 24 无此问题——这是浏览器端限制；在本地 `http://127.0.0.1:3080` 访问不会触发。）
+
+**正确姿势二选一：**
+
+```bash
+# A. SSH 隧道（推荐，零改动，符合 dsh 只绑 127.0.0.1 的设计）
+ssh -L 3080:127.0.0.1:3080 root@<服务器IP>
+# 本地浏览器访问 http://127.0.0.1:3080
+
+# B. HTTPS 反代（需要域名，Caddy 自动签证书）
+# apt install caddy && caddy reverse-proxy --from https://dsh.你的域名 --to 127.0.0.1:3080
+```
 
 ## 模型凭据
 

@@ -39,7 +39,8 @@ RUN mkdir -p /workspace && chown dsh:dsh /workspace \
  # 无法在 ~/.dsh 下创建 profiles/。
  && mkdir -p /home/dsh/.dsh && chown -R dsh:dsh /home/dsh
 
-USER dsh
+# 不写 USER：默认以 root 启动，entrypoint 自动修复 bind mount 目录属主
+# 后通过 setpriv 降权到 dsh(1001) 运行，宿主侧无需手动 chown。
 
 ENV DSH_TELEMETRY_DISABLED=1 \
     DSH_HOME=/home/dsh/.dsh \
