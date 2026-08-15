@@ -1,0 +1,5 @@
+# Keep the build context small (the Dockerfile clones the repo itself).
+**/.git
+**/node_modules
+workspace/
+*.log

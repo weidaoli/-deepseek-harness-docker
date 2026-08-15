@@ -1,0 +1,32 @@
+services:
+  dsh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Which branch/tag/commit of deepseek-ai/deepseek-harness to build.
+        BRANCH: master
+    # dsh deliberately refuses to bind 0.0.0.0 (it would expose remote code
+    # execution to the network), so the server binds 127.0.0.1:3080 *inside*
+    # the container. DSH_RELAY_PORT makes the entrypoint start a socat relay
+    # (0.0.0.0:3080 -> 127.0.0.1:3080) so the normal `ports:` publishing works
+    # on Docker Desktop / WSL2 and native Linux alike.
+    #
+    # Native-Linux alternative without the relay (server stays loopback-only):
+    #   network_mode: host
+    # and drop DSH_RELAY_PORT; the UI is then at http://127.0.0.1:3080.
+    ports:
+      - "3080:3080"
+    environment:
+      - DSH_TELEMETRY_DISABLED=1
+      - DSH_RELAY_PORT=3080
+    volumes:
+      # Shared working directory (host <-> container). dsh starts here and
+      # uses it as the default filesystem location.
+      - ./workspace:/workspace
+      # Shared harness home (host <-> container): settings.yaml,
+      # .credentials.yaml, profiles/*, sessions — all dsh config lives here.
+      # First run: mkdir -p dsh-home && sudo chown -R 1001:1001 dsh-home
+      # (optionally: rm -rf dsh-home/profiles/node_modules — dsh rebuilds it)
+      - ./dsh-home:/home/dsh/.dsh
+    restart: unless-stopped

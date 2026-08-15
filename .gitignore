@@ -1,0 +1,18 @@
+# ============ 运行时数据：切勿上传（可能含 API key / 凭据 / 会话） ============
+# 共享工作目录（宿主侧挂载卷）
+/workspace/
+# dsh 配置目录：settings.yaml / .credentials.yaml / profiles/ / sessions/
+/dsh-home/
+
+# ============ 敏感文件兜底 ============
+.env
+.env.*
+*.credentials*.yaml
+*.credentials*.yml
+*.credentials*.json
+*.key
+*.pem
+
+# ============ 常规忽略 ============
+*.log
+.DS_Store
